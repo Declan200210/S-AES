@@ -62,6 +62,81 @@
 如图所示，明文为6f6b，密文为71e2，密钥为a73b3457。
 
 ###### 4.2.中间相遇攻击
+我们所用到的函数如下：
+```
+int ff=0;
+        QString plaintext = plaintextEdit->text();
+        QString m1;
+        QString plaintext2 = plaintextEdit2->text();
+        QString m11;
+        QString ciphertext = ciphertextEdit->text();
+        QString m2;
+        QString ciphertext2 = ciphertextEdit2->text();
+        QString m22;
+        const int size = 65536;
+          //unsigned short possibilities[size];
+
+          for (int i = 0; i < size; i++) {
+              unsigned short number = static_cast<unsigned short>(i);
+              unsigned short a = (number & 0xF000) >> 12;
+              unsigned short b = (number & 0x0F00) >> 8;
+              unsigned short c = (number & 0x00F0) >> 4;
+              unsigned short d = number & 0x000F;
+
+              unsigned short key1 = (a << 12) | (b << 8) | (c << 4) | d;
+              encrypt(plaintext, key1,m1);
+               encrypt(plaintext2, key1,m11);
+              for (int j = 0; j< size; j++) {
+                  unsigned short number0 = static_cast<unsigned short>(j);
+                  unsigned short a0 = (number0 & 0xF000) >> 12;
+                  unsigned short b0 = (number0 & 0x0F00) >> 8;
+                  unsigned short c0 = (number0 & 0x00F0) >> 4;
+                  unsigned short d0 = number0 & 0x000F;
+
+                  unsigned short key2 = (a0 << 12) | (b0 << 8) | (c0 << 4) | d0;
+                  decrypt(ciphertext, key2,m2 );
+                  decrypt(ciphertext2, key2,m22 );
+                  if(m1==m2 && m11==m22)//&& m11==m22
+                  {
+
+                      // 将 key1 和 key2 拆分为四个 4 位的值
+                      unsigned short a1 = (key1 & 0xF000) >> 12;
+                      unsigned short b1 = (key1 & 0x0F00) >> 8;
+                      unsigned short c1 = (key1 & 0x00F0) >> 4;
+                      unsigned short d1 = key1 & 0x000F;
+
+                      unsigned short e = (key2 & 0xF000) >> 12;
+                      unsigned short f = (key2 & 0x0F00) >> 8;
+                      unsigned short g = (key2 & 0x00F0) >> 4;
+                      unsigned short h = key2 & 0x000F;
+
+                      // 将拆分后的值转换为 QString
+                      QString strKey1 = QString("%1%2%3%4").arg(a1, 0, 16).arg(b1, 0, 16).arg(c1, 0, 16).arg(d1, 0, 16);
+                      QString strKey2 = QString("%1%2%3%4").arg(e, 0, 16).arg(f, 0, 16).arg(g, 0, 16).arg(h, 0, 16);
+                      qDebug()<<strKey1<<strKey2;
+                       statusLabel->setText("结果:"+strKey1+strKey2+"\n");
+                            if(ff==0)
+                            {
+                                ff=1;
+                                /;
+                            }
+
+                  }
+              }
+              if(ff==1)
+              {
+                  ff=0;
+                  /;
+              }
+
+          }
+```
+
+我们首先进行了一组明密文进行破解，出现了很多结果，发现密钥不止一个。我们调用应用程序输出窗口进行观察，在只有一组明密文的时候，计算机缓慢输出很多结果。
+
+![image](中间相遇.png)
+
+我们进行了两组明密文进行破解，判断 if(m1==m2 && m11==m22)；都满足那么密钥很可能就是这个，设备可能出现问题，最后破解一直没出结果，此处怀疑是因为破解速度过慢，未能输出结果。
 
 ###### 4.3.三重加密
 在完成双重加密后，换个密钥，再对加密后的密文进行一次加密，该关卡成功通关，以下是效果图：
@@ -74,12 +149,8 @@
 
 如图所示，明文为6f6b，密文为b266，密钥为a73b3457bc28。
 
-#### 5.封闭测试
-根据第四关的结果，我们不难发现，对于随机选择的明密文对，有不止一个key。
-
-因此，我们又通过对一个选定的明文01010001，我们用可用的所有10bit密钥（共1024个）对其进行加密，并统计所出现的重复密文以及重复次数，结果如下图：
-
-![image](封闭测试.png)
+#### 5.工作模式
+使用密码分组链（CBC）模式对
 
 ## 开发手册
 #### 1.加密、解密函数设计
