@@ -150,7 +150,51 @@ int ff=0;
 如图所示，明文为6f6b，密文为b266，密钥为a73b3457bc28。
 
 #### 5.工作模式
-使用密码分组链（CBC）模式对
+使用密码分组链（CBC）模式对031abce5352b进行操作，每4位为一组，使模式中我们随机生成一个IV初始向量：
+```
+std::string generateRandomHex()
+{
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(0, 15);
+
+    std::stringstream ss;
+    for (int i = 0; i < 4; ++i) {
+        int num = dis(gen);
+        ss << std::hex << std::setw(1) << num;
+    }
+
+    return ss.str();
+}
+```
+
+我们观察随机生成的向量为15bc，此次使用的key为ae34，根据CBC模式，我们将明文和前一个明文的密文块（如果为第一组明文，即为初始向量）异或：
+```
+std::string xorHex(std::string hex1, std::string hex2)
+{
+    std::stringstream ss1(hex1);
+    std::stringstream ss2(hex2);
+    int num1, num2;
+    
+    ss1 >> std::hex >> num1;
+    ss2 >> std::hex >> num2;
+    
+    int result = num1 ^ num2;
+    
+    std::stringstream ss;
+    ss << std::hex << std::setw(1) << result;
+    
+    return ss.str();
+}
+```
+
+通过以上方式，我们得到结果：d84c37c1ff8e
+
+然后，我们将我们的得到的密文中某一组进行改变，将第二组的37c1改为37c2，再进行解密操作，将密文输出明文结果后，与前一个密文（第一个密文与IV进行操作）进行异或操作
+
+最后我们得到结果：031a32093528
+
+由此，我们观察了一下代码逻辑，发现密文块中某一组改变，只会改变其自身的明文与下一个密文块产生的明文。
 
 ## 开发手册
 #### 1.加密、解密函数设计
