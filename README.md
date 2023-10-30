@@ -82,501 +82,466 @@
 ![image](封闭测试.png)
 
 ## 开发手册
-#### 1.密钥扩展置设计
+#### 1.加密、解密函数设计
 ```
-// P10置换表
-int P10[] = { 3, 5, 2, 7, 4, 10, 1, 9, 8, 6 };
-
-// P8置换表
-int P8[] = { 6, 3, 7, 4, 8, 5, 10, 9 };
-
-// 左移位数
-int left_shift1[] = { 1, 1 };
-int left_shift2[] = { 2, 2 };
-
-// 左循环移位函数
-bitset<5> leftCircularShift(const bitset<5>& bits, int shift) {
-    bitset<5> shifted_bits;
-    for (int i = 0; i < 5; i++) {
-        int new_pos = (i + shift) % 5;
-        shifted_bits[i] = bits[new_pos];
-    }
-    return shifted_bits;
-}
-
-// P8置换函数
-bitset<8> performP8(const bitset<10>& key) {
-    bitset<8> new_key;
-    for (int i = 0; i < 8; i++) {
-        new_key[i] = key[P8[i] - 1];
-    }
-    return new_key;
-}
-```
-
-在主函数中调用：
-```
-// 将明文和密钥转换为二进制数组
-
-int p[8];
-for (int i = 0; i < 8; i++) {
-    p[i] = plaintext[i] - '0';
-}
-
-bitset<10>  k;
-for (int i = 0; i < 10; i++) {
-    k[i] = key[P10[i] - 1] - '0';
-}
-//cout << k[1] << endl;
-bitset<10> initial_key(k);
-bitset<5> left_half = (initial_key >> 5).to_ulong();
-bitset<5> right_half = (initial_key & bitset<10>("0000011111")).to_ulong();
-
-left_half = leftCircularShift(left_half, left_shift1[0]);
-right_half = leftCircularShift(right_half, left_shift1[1]);
-bitset<10> key1 = (left_half.to_ulong() << 5) | right_half.to_ulong();
-bitset<8> subkey1 = performP8(key1);
-
-left_half = leftCircularShift(left_half, left_shift2[0]);
-right_half = leftCircularShift(right_half, left_shift2[1]);
-bitset<10> key2 = (left_half.to_ulong() << 5) | right_half.to_ulong();
-bitset<8> subkey2 = performP8(key2);
-
-int k1[8];
-for (int i = 0; i < 8; i++) {
-    k1[i] = subkey1[i];
-}
-
-int k2[8];
-for (int i = 0; i < 8; i++) {
-    k2[i] = subkey2[i];
-}
-```
-
-通过以上方式获得子密钥k1、k2
-
-#### 2.初始置换盒、最终置换盒、轮函数设计
-```
-void replace_start(int p[], int c1[])//初始置换
+// 加密函数
+void encrypt(QString plaintext, unsigned short key, QString& ciphertext)
 {
+    unsigned char nibbles[4];
 
-    int rs[8] = { 2,6,3,1,4,8,5,7 };//初始置换盒
-    for (int i = 0; i < 8; i++)
-    {
-        c1[i] = p[rs[i] - 1];
+    // 判断输入是否为两个ASCII码
+    if (plaintext.length() == 2) {
+        // 将第一个ASCII码转换为nibbles
+          convertToNibbles0(plaintext.at(0).unicode(), nibbles);
+          // 将第二个ASCII码转换为nibbles
+          convertToNibbles0(plaintext.at(1).unicode(), nibbles + 2);
+    } else {
+        // 输入视为一个16进制字符串，将其转换为unsigned short类型的整数
+          unsigned short input = plaintext.toUShort(nullptr, 16);
+          // 将该整数转换为nibbles
+          convertToNibbles(input, nibbles);
+
     }
+
+    // 密钥扩展
+    unsigned short roundKeys[3];
+    expandKey(&key, roundKeys);
+
+    // 轮密钥加
+    nibbles[0] ^= (roundKeys[0] >> 12) & 0xF;
+    nibbles[1] ^= (roundKeys[0] >> 8) & 0xF;
+    nibbles[2] ^= (roundKeys[0] >> 4) & 0xF;
+    nibbles[3] ^= roundKeys[0] & 0xF;
+
+    // 轮函数
+    substituteNibbles(nibbles, SBox);
+
+    shiftRows(nibbles);
+
+    mixColumns(nibbles, MixMatrix);
+
+    // 轮密钥加
+    nibbles[0] ^= (roundKeys[1] >> 12) & 0xF;
+    nibbles[1] ^= (roundKeys[1] >> 8) & 0xF;
+    nibbles[2] ^= (roundKeys[1] >> 4) & 0xF;
+    nibbles[3] ^= roundKeys[1] & 0xF;
+
+    // 轮函数
+    substituteNibbles(nibbles, SBox);
+
+    shiftRows(nibbles);
+    // 最后一轮密钥加
+    nibbles[0] ^= (roundKeys[2] >> 12) & 0xF;
+    nibbles[1] ^= (roundKeys[2] >> 8) & 0xF;
+    nibbles[2] ^= (roundKeys[2] >> 4) & 0xF;
+    nibbles[3] ^= roundKeys[2] & 0xF;
+//qDebug()<<nibbles[0]<<nibbles[1]<<nibbles[2]<<nibbles[3];
+
+    if (plaintext.length() == 2) {
+        unsigned char asciiCodes[2];
+        asciiCodes[0] = combineNibbles(nibbles); // 合并前两个 nibbles
+        asciiCodes[1] = combineNibbles(nibbles + 2); // 合并后两个 nibbles
+
+        ciphertext = QString(QChar(asciiCodes[0])) + QString(QChar(asciiCodes[1]));
+    } else {// 将 nibbles 转换为十六进制字符串
+        QString hexString = QString("%1%2%3%4")
+            .arg(nibbles[0], 1, 16)
+            .arg(nibbles[1], 1, 16)
+            .arg(nibbles[2], 1, 16)
+            .arg(nibbles[3], 1, 16);
+
+            ciphertext = hexString;
+    }
+
+   // qDebug()<<ciphertext;
 }
 
-void replace_end(int c[], int p1[])//最终置换
+// 解密函数
+void decrypt(QString ciphertext, unsigned short key, QString& plaintext)
 {
+    unsigned char nibbles[4];
+    // 判断输入是否为两个ASCII码
+    if (ciphertext.length() == 2) {
+        // 将第一个ASCII码转换为nibbles
+          convertToNibbles0(ciphertext.at(0).unicode(), nibbles);
+          // 将第二个ASCII码转换为nibbles
+          convertToNibbles0(ciphertext.at(1).unicode(), nibbles + 2);
+    } else {
+        // 输入视为一个16进制字符串，将其转换为unsigned short类型的整数
+          unsigned short input = ciphertext.toUShort(nullptr, 16);
+          // 将该整数转换为nibbles
+          convertToNibbles(input, nibbles);
 
-    int re[8] = { 4,1,3,5,7,2,8,6 };//最终置换盒
-    for (int i = 0; i < 8; i++)
-    {
-        p1[i] = c[re[i] - 1];
+    }
+
+    // 密钥扩展
+    unsigned short roundKeys[4];
+    expandKey(&key, roundKeys);
+
+    // 最后一轮密钥加
+    nibbles[0] ^= (roundKeys[2] >> 12) & 0xF;
+    nibbles[1] ^= (roundKeys[2] >> 8) & 0xF;
+    nibbles[2] ^= (roundKeys[2] >> 4) & 0xF;
+    nibbles[3] ^= roundKeys[2] & 0xF;
+
+    // 逆行位移
+    shiftRowsInverse(nibbles);
+    // 逆S盒代替
+    substituteNibblesInverse(nibbles, InvSBox);
+
+    // 轮函数
+    nibbles[0] ^= (roundKeys[1] >> 12) & 0xF;
+    nibbles[1] ^= (roundKeys[1] >> 8) & 0xF;
+    nibbles[2] ^= (roundKeys[1] >> 4) & 0xF;
+    nibbles[3] ^= roundKeys[1] & 0xF;
+    mixColumns(nibbles, rMixMatrix);
+    shiftRowsInverse(nibbles);
+    substituteNibblesInverse(nibbles, InvSBox);
+
+
+    // 轮密钥加
+    nibbles[0] ^= (roundKeys[0] >> 12) & 0xF;
+    nibbles[1] ^= (roundKeys[0] >> 8) & 0xF;
+    nibbles[2] ^= (roundKeys[0] >> 4) & 0xF;
+    nibbles[3] ^= roundKeys[0] & 0xF;
+
+    if (ciphertext.length() == 2) {
+        unsigned char asciiCodes[2];
+        asciiCodes[0] = combineNibbles(nibbles); // 合并前两个 nibbles
+        asciiCodes[1] = combineNibbles(nibbles + 2); // 合并后两个 nibbles
+
+        plaintext = QString(QChar(asciiCodes[0])) + QString(QChar(asciiCodes[1]));
+    } else {// 将 nibbles 转换为十六进制字符串
+        QString hexString = QString("%1%2%3%4")
+            .arg(nibbles[0], 1, 16)
+            .arg(nibbles[1], 1, 16)
+            .arg(nibbles[2], 1, 16)
+            .arg(nibbles[3], 1, 16);
+        plaintext = hexString;
     }
 
 }
+```
 
-// 左移一位
-void leftShift(int arr[]) {
-    int temp = arr[0]; // 保存第一个元素的值
+![image](加解密过程.png)
 
-    for (int i = 0; i < 3; i++) {
-        arr[i] = arr[i + 1]; // 将后一个元素的值赋给当前元素
-    }
-
-    arr[3] = temp; // 将保存的第一个元素的值赋给最后一个元素
-}
-
-// 右移一位
-void rightShift(int arr[]) {
-    int temp = arr[3]; // 保存最后一个元素的值
-
-    for (int i = 3; i > 0; i--) {
-        arr[i] = arr[i - 1]; // 将前一个元素的值赋给当前元素
-    }
-
-    arr[0] = temp; // 将保存的最后一个元素的值赋给第一个元素
-}
-int bitOr(int a, int b) {//相或
-    return (a ^ b); // 使用按位或运算符实现
-}
-void x_y(int a, int b, int& c)//s盒依据拓展的特定位数判断盒中的横纵
+#### 2.密钥扩展函数设计
+```
+// S-AES密钥扩展函数
+void expandKey(const unsigned short* originalKey, unsigned short* roundKeys)
 {
-    if (a == 1 && b == 1)
-    {
-        c = 3;
-    }
-    else if (a == 1 && b == 0)
-    {
-        c = 2;
-    }
-    else if (a == 0 && b == 1)
-    {
-        c = 1;
-    }
-    else if (a == 0 && b == 0)
-    {
-        c = 0;
-    }
-}
-void tr(int a, int& b, int& c)// 依据s盒中数据给出01值
-{
-    if (a == 0)
-    {
-        b = 0; c = 0;
-    }
-    else if (a == 1)
-    {
-        b = 0; c = 1;
-    }
-    else if (a == 2)
-    {
-        b = 1; c = 0;
-    }
-    else if (a == 3)
-    {
-        b = 1; c = 1;
-    }
-}
+    unsigned char keyBytes[2];
+    convertToBytes(originalKey[0], keyBytes);
+//qDebug()<<originalKey[0]<<keyBytes[0]<<keyBytes[1];
+    // 将原始密钥存储在轮密钥中
+    roundKeys[0] = originalKey[0];
+  //qDebug()<<roundKeys[0];
+    // 生成2个额外的轮密钥
+    for (int i = 1; i < 3; i++) {
+        unsigned char k0;
+        g(keyBytes[1],i,&k0);
 
-void fk(int ip[], int k[], int f[])//轮函数fk
-{
-    //int left[4];
-    int right[4];//取出右半数组
-    //for (int i = 0; i < 4; i++)
-    //{
-        //left[i] = ip[i];
-   // }
-    for (int i = 4; i < 8; i++)
-    {
-        right[i - 4] = ip[i];
-    }
-    int right_e[8];
-    rightShift(right);
-    for (int i = 0; i < 4; i++)
-    {
-        right_e[i] = right[i];
-    }
-    leftShift(right);
-    leftShift(right);
-    for (int i = 4; i < 8; i++)
-    {
-        right_e[i] = right[i - 4];
-    }//拓展置换
-    //相或
-    for (int i = 0; i < 8; i++)
-    {
-        right_e[i] = bitOr(right_e[i], k[i]);
-    }
-    int s1[4][4] = { {1,0,3,2},
-                     {3,2,1,0},
-                     {0,2,1,3},
-                     {3,1,0,2} };
-    int s2[4][4] = { {0,1,2,3},
-                     {2,3,1,0},
-                     {3,0,1,2},
-                     {2,1,0,3} };//定义s盒1和2
-    int x, y;
-    x_y(right_e[0], right_e[3], x);
-    x_y(right_e[1], right_e[2], y);
-    //cout << right_e[0] <<"   "<< right_e[3] << endl;
-    //cout << 10 << endl;
-    int S[4];//一个用来存储s盒改变完后的数组 
-    tr(s1[x][y], a, b);
-    S[0] = a;
-    S[1] = b;
-    x_y(right_e[4], right_e[7], x);
-    x_y(right_e[5], right_e[6], y);
-    tr(s2[x][y], a, b);
-    S[2] = a;
-    S[3] = b;
-    int sp[4] = { 2,4,3,1 };
-    //最终出现的轮函数F
-    for (int i = 0; i < 4; i++)
-    {
-        f[i] = S[sp[i] - 1];
-    }
+        keyBytes[0]= keyBytes[0]^k0;
 
-}
-void rearr(int f[], int ip[])//pi左半与F进行或操作
-{
-    for (int i = 0; i < 4; i++)
-    {
-        ip[i] = bitOr(f[i], ip[i]);
-    }
-}
-void exchange(int ip[])//数组交换左右部分
-{
-    for (int i = 0; i < 4; i++) {
-        int temp = ip[i]; // 保存左半部分的元素
-        ip[i] = ip[i + 4]; // 将右半部分的元素复制到左半部分
-        ip[i + 4] = temp; // 将左半部分的元素复制到右半部分
+          keyBytes[1]^=keyBytes[0];
+        // 生成轮密钥
+        quint16 result = (static_cast<quint16>(keyBytes[0]) << 8) | static_cast<quint16>(keyBytes[1]);
+         // qDebug()<<(static_cast<quint16>(keyBytes[0]) << 8);
+
+        roundKeys[i] = static_cast<unsigned short>(result);
+        //qDebug()<<roundKeys[i];
     }
 }
 ```
 
-在主函数中调用：
+其中用得到的相关组件：
 ```
-int ip[8];//中间存储数组
-replace_start(p, ip);
-int f[4];//F
-fk(ip, k1, f);
-rearr(f, ip);
-exchange(ip);
-fk(ip, k2, f);
-rearr(f, ip);
-int c[8];//最终密文
-replace_end(ip, c);
-// 将密文转换为字符串
-char ciphertext[9];
-for (int i = 0; i < 8; i++) {
-    ciphertext[i] = c[i] + '0';
+//g函数
+void g(unsigned short input,int i,unsigned char* key )
+{
+    unsigned char leftHalf = (input >> 4) & 0x0F; // 获取左半部分（高4位）
+    unsigned char rightHalf= input & 0x0F; // 获取右半部分（低4位）
+    unsigned char result[2];
+    result[0] = rightHalf;
+    result[1] = leftHalf;
+
+        int row = (leftHalf>> 2) & 0x03;
+        int col = leftHalf & 0x03;
+       result[1] = SBox[row * 4 + col];
+        int row1 = (rightHalf>> 2) & 0x03;
+        int col1 = rightHalf & 0x03;
+        result[0]  = SBox[row1 * 4 + col1];
+    unsigned char byte = ( result[0]  << 4) | result[1]  ;
+    byte ^=Rcon[i - 1];
+    *key=byte;//qDebug()<<byte;
 }
-ciphertext[8] = '\0';
+
+// S盒和逆S盒
+const unsigned char SBox[16] = {0x9, 0x4, 0xA, 0xB, 0xD, 0x1, 0x8, 0x5, 0x6, 0x2, 0x0, 0x3, 0xC, 0xE, 0xF, 0x7};
+const unsigned char InvSBox[16] = {0xA, 0x5, 0x9, 0xB, 0x1, 0x7, 0x8, 0xF, 0x6, 0x0, 0x2, 0x3, 0xC, 0x4, 0xD, 0xE};
+//轮常量
+const unsigned char Rcon[10] = {
+    0x80, 0x30
+};
+
+void convertToBytes(unsigned short value, unsigned char* bytes)
+{
+    bytes[0] = (value >> 8) & 0xFF;  // 高位字节
+    bytes[1] = value & 0xFF;         // 低位字节
+}
 ```
 
-通过以上方式，将输入的明文，结合之前得到子密钥k1、k2，即可获得密文ciphertext。
+通过以上方法得到第一轮和第二轮加密的扩展密钥。
 
-采用以上设计，将k1与k2的使用位置对换（即将fk(ip, k1, f)与fk(ip, k2, f)这两行代码的位置对换），即可完成密文解密为明文。
-
-#### 3.扩展功能实现
-输入字符转换为8位2进制：
+#### 3.半字节代替函数设计
 ```
-cin >> str1;
-    if (str1.length() == 1) {//输入一个字符转换8bit数据 
-        char ch = str1[0];
-        bitset<8> binary(ch);  // 将字符 ch 转换为 8 位二进制数
-        for (int i = 0; i < 8; ++i) {
-            p[i] = binary[i];   // 将二进制数按位存入数组
-        }
-        int start = 0;
-        int end = 7;
-
-        while (start < end) {
-            // 交换数组元素
-            int temp = p[start];
-            p[start] = p[end];
-            p[end] = temp;
-
-            // 更新指针
-            start++;
-            end--;
-        }//因为其倒置了，所以要置换回去
+// S盒代替
+void substituteNibbles(unsigned char* nibbles, const unsigned char* sBox)
+{
+    for (int i = 0; i < 4; ++i) {
+        int row = (nibbles[i] >> 2) & 0x03;
+        int col = nibbles[i] & 0x03;
+        nibbles[i] = sBox[row * 4 + col];
     }
-    else {//检测为8位及不是输入字符，就如此输入
-        for (int i = 0; i < 8; i++) {
-            p[i] = str1[i] - 48;
-        }
+}
+
+// 逆S盒代替
+void substituteNibblesInverse(unsigned char* nibbles, const unsigned char* invSBox)
+{
+    for (int i = 0; i < 4; ++i) {
+        int row = (nibbles[i] >> 2) & 0x03;
+        int col = nibbles[i] & 0x03;
+        nibbles[i] = invSBox[row * 4 + col];
     }
+}
 ```
 
-输出字符类型：
+#### 4.行位移函数设计
+输入明密文对：
 ```
- if (str1.length() == 1)
+// 行位移
+void shiftRows(unsigned char* nibbles)
+{
+    unsigned char temp = nibbles[1];
+    nibbles[1] = nibbles[3];
+    nibbles[3] = temp;
+}
+
+// 逆行位移
+void shiftRowsInverse(unsigned char* nibbles)
+{
+    unsigned char temp = nibbles[3];
+    nibbles[3] = nibbles[1];
+    nibbles[1] = temp;
+}
+```
+
+#### 5.列混淆函数设计
+```
+// 列混淆
+void mixColumns(unsigned char* nibbles, const unsigned char* mixMatrix)
+{
+    unsigned char result[4];
+
+        result[0] = multiply(mixMatrix[1],nibbles[1])^multiply(mixMatrix[0],nibbles[0]);
+        result[1] = multiply(mixMatrix[2], nibbles[0])^multiply(mixMatrix[3],nibbles[1]);
+        result[2] = multiply(mixMatrix[0],  nibbles[2]) ^multiply(mixMatrix[1], nibbles[3]);
+        result[3] = multiply(mixMatrix[2],nibbles[2]) ^ multiply(mixMatrix[3],nibbles[3]);
+
+    for (int i = 0; i < 4; ++i)
+        nibbles[i] = result[i];
+}
+void convertToNibbles0(unsigned short byte, unsigned char* nibbles)
+{
+    nibbles[0] = (byte >> 4) & 0xF;
+    nibbles[1] = byte & 0xF;
+}
+unsigned char combineNibbles(unsigned char* nibbles)
+{
+    unsigned char result = 0;
+       for (int i = 0; i < 2; i++) {
+           result <<= 4;
+           result |= nibbles[i];
+       }
+       return result;
+}
+```
+
+以下是相关组件实现：
+```
+// 列混淆的M矩阵
+const unsigned char MixMatrix[4] = {0x1, 0x4, 0x4, 0x1};
+const unsigned char rMixMatrix[4] = {0x9, 0x2, 0x2, 0x9};
+
+// TODO 实现x^nfx的函数
+void x_de_n_fang_cheng_fx(int xfx[4], int a[4]) //* xfx是结果，a是上一步的结果
+{
+    //! 注意要取模
+    //! 既约多项式是 x^4 + x + 1
+    //* 保存四次乘法的系数
+    if (a[0] == 0)
     {
-        string binaryStr;
-        for (int i = 0; i < 8; i++) {
-            binaryStr += to_string(c[i]);
-        }//转换为string类型
-
-        for (int i = 0; i < 8; i++)
-        {
-            cout << c[i];
-        }
-        cout << endl;
-        int num = stoi(binaryStr, nullptr, 2); //先转换为整数
-
-        // 将整数转换为对应的字符
-        char ch = static_cast<char>(num);
-        cout << "密文字符为: " << ch << endl;
+        for (int i = 0; i < 3; i++)
+            xfx[i] = a[i + 1];
     }
     else
     {
-        for (int i = 0; i < 8; i++)
-        {
-            cout << c[i];
+        //! 如果乘数首项不为1就需要将 b1x^2+b0x 与 x+1 进行异或
+        xfx[1] = a[2];
+        xfx[2] = a[3] == 1 ? 0 : 1;
+        xfx[3] = 1;
+    }
+}
+// TODO 乘法
+int* chengfa(int a[4], int b[4])
+{
+    //* 储存结果的系数
+    int* result = new int[4];
+    for (int i = 0; i < 4; i++)
+        result[i] = 0;
+
+    //* 记录下x^nfx
+    int xfx[4] = { 0 };
+    x_de_n_fang_cheng_fx(xfx, a);
+    int x2fx[4] = { 0 };
+    x_de_n_fang_cheng_fx(x2fx, xfx);
+    int x3fx[4] = { 0 };
+    x_de_n_fang_cheng_fx(x3fx, x2fx);
+
+    //* 现在需要根据多项式a和b开始异或
+    if (b[0] == 1)
+        for (int i = 0; i < 4; i++)
+            result[i] ^= x3fx[i];
+    if (b[1] == 1)
+        for (int i = 0; i < 4; i++)
+            result[i] ^= x2fx[i];
+    if (b[2] == 1)
+        for (int i = 0; i < 4; i++)
+            result[i] ^= xfx[i];
+    if (b[3] == 1)
+        for (int i = 0; i < 4; i++)
+            result[i] ^= a[i];
+
+    //qDebug()<<result[0]<<result[1]<<result[2]<<result[3]<<"zhongj";
+    return result;
+}
+
+void reverseArray(int arr[], int n)
+{
+    for (int i = 0; i < n / 2; i++) {
+        qSwap(arr[i], arr[n - 1 - i]);
+    }
+}
+// 将两个 4 位二进制字符相乘，返回结果的 unsigned char
+unsigned char multiply(unsigned char a, unsigned char b) {
+    // 将输入的二进制字符转换为 QBitArray
+    QBitArray bitsA(4);
+    for (int i = 0; i <4; i++) {
+        bitsA.setBit(i, (a & (1 << i)) != 0);
+    }
+    QBitArray bitsB(4);
+    for (int i = 0; i <4; i++) {
+        bitsB.setBit(i, (b & (1 << i)) != 0);
+    }
+
+    // 将 QBitArray 转换为 int 数组
+    int arrA[4] = { 0 };
+    for (int i = 0; i < 4; i++) {
+        arrA[i] = bitsA.at(i);
+        //qDebug()<< arrA[i]<<"A";
+    }
+    int arrB[4] = { 0 };
+    for (int i = 0; i < 4; i++) {
+        arrB[i] = bitsB.at(i);
+
+    }
+    reverseArray(arrA, 4);
+     reverseArray(arrB, 4);
+     for (int i = 0; i < 4; i++) {
+        // qDebug()<< arrA[i]<<"A"<<arrB[i]<<"B";
+
+     }
+    // 调用上述代码中的乘法函数进行计算
+    int* arrResult = chengfa(arrA, arrB);
+
+    // 将计算结果的 int 数组转换为 QBitArray
+    QBitArray bitsResult(4);
+    for (int i = 0; i < 4; i++) {
+        bitsResult.setBit(i, arrResult[i]);
+    }
+    for (int i = 0; i <  2; i++) {
+           bool temp = bitsResult.at(i);
+           bitsResult.setBit(i, bitsResult.at(3 - i));
+          bitsResult.setBit(3 - i, temp);
+       }
+    delete[] arrResult;
+
+    // 将计算结果的 QBitArray 转换为 unsigned char
+    unsigned char result = 0;
+    for (int i = 0; i < 4; i++) {
+        if (bitsResult.testBit(i)) {
+            result |= (1 << i);
         }
     }
-```
-
-#### 4.暴力破解实现
-输入明密文对：
-```
-string plaintexts[3];  // 存储明文
-string ciphertexts[3]; // 存储密文
-
-for (int i = 0; i < 3; i++) {
-    cout << "请输入第 " << i + 1 << " 对明文 (8位二进制)：";
-    cin >> plaintexts[i];
-    cout << "请输入对应的密文 (8位二进制)：";
-    cin >> ciphertexts[i];
+//qDebug()<<result;
+    return result;
 }
 ```
 
-设置时间戳记录破解时间：
-```
-// 记录开始时间
-auto start_time = high_resolution_clock::now();
-
-// 记录结束时间
-auto end_time = high_resolution_clock::now();
-
-// 计算耗时（以毫秒为单位）
-auto duration = duration_cast<milliseconds>(end_time - start_time);
-```
-
-尝试所有可能的key，如果加密后的密文与输入的密文匹配，将其输出：
-```
-for (int key = 0; key < 1024; key++)
-
-// 逐一比较密文和c1
-bool match = true;
-for (int j = 0; j < 8; j++) {
-    if (c[j] != c1[j]) {
-        match = false;
-        break;
-    }
-}
-
-// 如果匹配，打印密钥
-if (match) {
-    std::bitset<10> binary(key);
-    cout << "匹配的密钥: ";
-    for (int j = 0; j < 10; j++) {
-        cout << binary[j];
-    }
-    cout << endl;
-}
-```
-
-#### 5.封闭测试实现
-下列代码查找重复密文：
-```
-int p[8];
-    string input_key_str;
-    
-    //string str1;
-    vector<vector<int>> cm;
-       vector<string> binaryArrays;
-
-        // 遍历所有可能的情况
-        for (int i = 0; i < 1024; i++) {
-            string binaryArray;
-
-            // 将整数转换为二进制字符串
-            for (int j = 9; j >= 0; j--) {
-                binaryArray += to_string((i >> j) & 1);
-            }
-
-            binaryArrays.push_back(binaryArray);
-        }//找到所有10位密文的情况
-        int p0[3][8] = { {0,1,0,1,0,0,0,1},
-               {1,1,0,0,0,1,0,1},
-               {1,0,0,0,1,1,0,1}};//要查找多个密文的示例3个明文
-       for (int i = 0; i < 3; i++)//对所有3个示例明文循环查找
-       {
-           for (int j = 0; j < 1024; j++) {//用每个密钥进行加密
-
- map<vector<int>, int> countMap;
-       for (const auto& array : cm) {
-           countMap[array]++;//利用其找到重复的密文
-       }
-
-       // 输出重复的数组以及它们的重复次数
-       for (const auto& pair : countMap) {
-           if (pair.second > 1) {
-               cout << "重复的密文：";
-               for (const auto& element : pair.first) {
-                   cout << element << " ";
-               }
-              cout << "，重复次数：" << pair.second << endl;
-           }
-       }
-```
-
-#### 6.GUI设计
+#### 6.主程序函数及GUI设计
 创建GUI窗口：
 ```
-int main(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
-    const wchar_t CLASS_NAME[] = L"SDESWindowClass";
+int main(int argc, char *argv[])
+{
+    QApplication a(argc, argv);
 
-    WNDCLASS wc = {};
+    QWidget window;
+    QVBoxLayout* layout = new QVBoxLayout(&window);
 
-    wc.lpfnWndProc = WindowProc;
-    wc.hInstance = hInstance;
-    wc.lpszClassName = CLASS_NAME;
+    QFormLayout* formLayout = new QFormLayout();
+    QLineEdit* plaintextEdit = new QLineEdit();
+    QLineEdit* keyEdit = new QLineEdit();
+    QLineEdit* ciphertextEdit = new QLineEdit();
+    formLayout->addRow("Plaintext:", plaintextEdit);
+    formLayout->addRow("Key:", keyEdit);
+    formLayout->addRow("Ciphertext:", ciphertextEdit);
+    layout->addLayout(formLayout);
 
-    RegisterClass(&wc);
+    QPushButton* encryptButton = new QPushButton("加密");
+    QPushButton* decryptButton = new QPushButton("解密");
+    layout->addWidget(encryptButton);
+    layout->addWidget(decryptButton);
 
-    HWND hWnd = CreateWindowEx(0, CLASS_NAME, L"S-DES", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, nullptr, nullptr, hInstance, nullptr);
-    if (hWnd == nullptr) {
-        return 0;
-    }
+    QLabel* statusLabel = new QLabel();
+    layout->addWidget(statusLabel);
 
-    // 创建输入明文的编辑框
-    hWndEditInputPlaintext = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 10, 10, 200, 30, hWnd, (HMENU)EDIT_INPUT_PLAINTEXT_ID, nullptr, nullptr);
-    if (hWndEditInputPlaintext == nullptr) {
-        return 0;
-    }
+    QObject::connect(encryptButton, &QPushButton::clicked, [&]() {
+        bool ok;
+        QString plaintext = plaintextEdit->text();
+        unsigned short key = keyEdit->text().toUShort(&ok, 16);
+        QString ciphertext;
 
-    // 创建输入密钥的编辑框
-    hWndEditInputKey = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 10, 50, 200, 30, hWnd, (HMENU)EDIT_INPUT_KEY_ID, nullptr, nullptr);
-    if (hWndEditInputKey == nullptr) {
-        return 0;
-    }
+        encrypt(plaintext, key, ciphertext);
 
-    // 创建按钮
-    hWndButton = CreateWindow(L"BUTTON", L"加密", WS_CHILD | WS_VISIBLE, 10, 100, 80, 30, hWnd, (HMENU)BUTTON_ID, nullptr, nullptr);
-    if (hWndButton == nullptr) {
-        return 0;
-    }
+        ciphertextEdit->setText( ciphertext);
+        statusLabel->setText("Encryption completed.");
+    });
 
-    // 创建输出密文的编辑框
-    hWndEditOutputCiphertext = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_READONLY | ES_AUTOHSCROLL, 10, 150, 200, 30, hWnd, (HMENU)EDIT_OUTPUT_CIPHERTEXT_ID, nullptr, nullptr);
-    if (hWndEditOutputCiphertext == nullptr) {
-        return 0;
-    }
+    QObject::connect(decryptButton, &QPushButton::clicked, [&]() {
+        bool ok;
+        QString ciphertext = ciphertextEdit->text();
+        unsigned short key = keyEdit->text().toUShort(&ok, 16);
+        QString plaintext;
 
-    ShowWindow(hWnd, nCmdShow);
+        decrypt(ciphertext, key, plaintext);
 
-    MSG msg = {};
-    while (GetMessage(&msg, nullptr, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
+       plaintextEdit->setText( plaintext);
+        statusLabel->setText("Decryption completed.");
+    });
 
-    return 0;
-}
-```
+    window.show();
 
-当用户通过GUI进行操作时的反馈：
-```
-LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    switch (uMsg) {
-    case WM_COMMAND:
-        if (HIWORD(wParam) == BN_CLICKED) {
-            if ((HWND)lParam == hWndButton) {
-
-                // 加解密操作
-
-                // 将密文输出到控件
-                SetWindowTextA(hWndEditOutputCiphertext, ciphertext);
-            }
-        }
-        break;
-    case WM_CLOSE:
-        DestroyWindow(hwnd);
-        break;
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        break;
-    default:
-        return DefWindowProc(hwnd, uMsg, wParam, lParam);
-    }
-
-    return 0;
+    return a.exec();
 }
 ```
 
